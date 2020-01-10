@@ -192,13 +192,13 @@ class Unet_decoder_input(nn.Module):
         # input_4 = F.interpolate(input, low0.size()[2:], mode='bilinear', align_corners=True)
         # input_2 = F.interpolate(input, low0.size()[2:], mode='bilinear', align_corners=True)
         x = self.encoder(x)
-        input_16 = F.interpolate(input, x.size()[2:], mode='bilinear', align_corners=True)
+        input_16 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
         x =self.up1(low2,torch.cat((x,input_16),dim=1))#1/8
-        input_8 = F.interpolate(input, x.size()[2:], mode='bilinear', align_corners=True)
+        input_8 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
         x =self.up2(low1,torch.cat((x,input_8),dim=1))#1/4
-        input_4 = F.interpolate(input, x.size()[2:], mode='bilinear', align_corners=True)
+        input_4 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
         x =self.up3(low0,torch.cat((x,input_4),dim=1))#1/2
-        input_2 = F.interpolate(input, x.size()[2:], mode='bilinear', align_corners=True)
+        input_2 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
         seg=self.OutConv(torch.cat((x,input_2),dim=1))#1/2
 
         seg= F.interpolate(seg,input.size()[2:], mode='bilinear' ,align_corners=True)
