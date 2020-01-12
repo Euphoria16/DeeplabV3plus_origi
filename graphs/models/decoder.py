@@ -147,10 +147,12 @@ class Unet_decoder(nn.Module):
         super(Unet_decoder, self).__init__()
         self.Resnet101 = resnet101(bn_momentum, pretrained, output_stride)
         self.encoder = Encoder(bn_momentum, output_stride)
+        self.inc= DoubleConv(3,64)
         # self.cascade_num = cascade_num
         self.up1= Up(512+256,256,bilinear=bilinear)#to 1/8
         self.up2 = Up(256 + 256, 128, bilinear=bilinear)# to 1/4
         self.up3 = Up(128+64,64,bilinear=bilinear)# to 1/2
+        self.up4 = Up(64+64,64,bilinear=bilinear)
         self.OutConv=OutConv(64,class_num)
         if freeze_bn:
             self.freeze_bn()
@@ -158,13 +160,16 @@ class Unet_decoder(nn.Module):
 
     def forward(self, input):
         x,low0,low1,low2=self.Resnet101(input)
+        inc1=self.inc(input)
         x = self.encoder(x)
         x =self.up1(low2,x)
         x =self.up2(low1,x)
         x =self.up3(low0,x)
+        x =self.up4(inc1,x)
+
         seg=self.OutConv(x)
 
-        seg= F.interpolate(seg,input.size()[2:], mode='bilinear' ,align_corners=True)
+        # seg= F.interpolate(seg,input.size()[2:], mode='bilinear' ,align_corners=True)
         return seg
 
     def freeze_bn(self):
