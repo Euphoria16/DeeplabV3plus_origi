@@ -33,8 +33,8 @@ RUN_NAME=voc_unet_input
 ########################################################################################################################
 #  Training
 ########################################################################################################################
-$PYTHON -u train_voc_unet_decoder_input.py --gpu $GPU --freeze_bn $FREZEE_BN_STAGE1 \
- --bn_momentum $BN_MOMENTUM --lr $LEARNING_RATE_STAGE1 --output_stride $OUTPUT_STRIDE_STAGE1 --run_name $RUN_NAME
+$PYTHON -u train_voc_unet_decoder_input.py --gpu $GPU --freeze_bn $FREZEE_BN_STAGE1 --batch_size_per_gpu 8 \
+--bn_momentum $BN_MOMENTUM --lr $LEARNING_RATE_STAGE1 --output_stride $OUTPUT_STRIDE_STAGE1 --run_name $RUN_NAME
 
 #$PYTHON -u train.py --gpu $GPU --store_checkpoint_name $STORE_CHRCKPOINT_NAME_STAGE2 \
 #--saved_checkpoint_file $SAVED_CHECKPOINT_FILE_STAGE2 --freeze_bn $FREZEE_BN_STAGE2 --bn_momentum $BN_MOMENTUM \

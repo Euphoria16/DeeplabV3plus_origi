@@ -122,7 +122,9 @@ class Up(nn.Module):
         self.conv = DoubleConv(in_channels, out_channels)
 
     def forward(self, x1, x2):
+        # print('before upsample',x1.size())
         x1 = self.up(x1)
+        # print('after upsample', x1.size())
         # input is CHW
         diffY = torch.tensor([x2.size()[2] - x1.size()[2]])
         diffX = torch.tensor([x2.size()[3] - x1.size()[3]])
@@ -159,15 +161,22 @@ class Unet_decoder(nn.Module):
             print("freeze bacth normalization successfully!")
 
     def forward(self, input):
-        x,low0,low1,low2=self.Resnet101(input)
+        x,low0,low1,low2=self.Resnet101(input)#1/2,1/4,1/8
         inc1=self.inc(input)
+        # print('inc1',inc1.size())
         x = self.encoder(x)
-        x =self.up1(low2,x)
-        x =self.up2(low1,x)
-        x =self.up3(low0,x)
-        x =self.up4(inc1,x)
+        x =self.up1(x,low2)
+        # print('low size',low0.size(),low1.size(),low2.size())
+        # print('up1 size', x.size())
+        x =self.up2(x,low1)
+        # print('up2 size', x.size())
+        x =self.up3(x,low0)
+        # print('up3 size',x.size())
+        x =self.up4(x,inc1)
+        # print('up4 size',x.size())
 
         seg=self.OutConv(x)
+        # print('seg size',seg.size())
 
         # seg= F.interpolate(seg,input.size()[2:], mode='bilinear' ,align_corners=True)
         return seg
@@ -176,37 +185,85 @@ class Unet_decoder(nn.Module):
         for m in self.modules():
             if isinstance(m, SynchronizedBatchNorm2d):
                 m.eval()
+class Up_input(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels // 2, in_channels // 2, kernel_size=2, stride=2)
+
+        self.conv = DoubleConv(in_channels, out_channels)
+
+    def forward(self, x1, x2, input):
+        # print('before upsample',x1.size())
+        x1 = self.up(x1)
+        # print('after upsample', x1.size())
+        # input is CHW
+        diffY = torch.tensor([x2.size()[2] - x1.size()[2]])
+        diffX = torch.tensor([x2.size()[3] - x1.size()[3]])
+
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
+        # if you have padding issues, see
+        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
+        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
+        x = torch.cat([x2, input, x1], dim=1)
+        return self.conv(x)
 class Unet_decoder_input(nn.Module):
     def __init__(self, output_stride, class_num, pretrained, bn_momentum=0.1, freeze_bn=False,
                  bilinear=True):
         super(Unet_decoder_input, self).__init__()
         self.Resnet101 = resnet101(bn_momentum, pretrained, output_stride)
         self.encoder = Encoder(bn_momentum, output_stride)
+        self.inc = DoubleConv(3, 64)
         # self.cascade_num = cascade_num
-        self.up1= Up(512+256+3,256,bilinear=bilinear)#to 1/8
-        self.up2 = Up(256 + 256+3, 128, bilinear=bilinear)# to 1/4
-        self.up3 = Up(128+64+3,64,bilinear=bilinear)# to 1/2
-        self.OutConv=OutConv(64+3,class_num)
+        self.up1= Up_input(512+256+3,256,bilinear=bilinear)#to 1/8
+        self.up2 = Up_input(256 + 256+3, 128, bilinear=bilinear)# to 1/4
+        self.up3 = Up_input(128+64+3,64,bilinear=bilinear)# to 1/2
+        self.up4 = Up_input(64 + 64 +3, 64, bilinear=bilinear)
+        self.OutConv=OutConv(64,class_num)
         if freeze_bn:
             self.freeze_bn()
             print("freeze bacth normalization successfully!")
 
     def forward(self, input):
         x,low0,low1,low2=self.Resnet101(input)
-
+        inc1 = self.inc(input)
         # input_4 = F.interpolate(input, low0.size()[2:], mode='bilinear', align_corners=True)
         # input_2 = F.interpolate(input, low0.size()[2:], mode='bilinear', align_corners=True)
         x = self.encoder(x)
-        input_16 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
-        x =self.up1(low2,torch.cat((x,input_16),dim=1))#1/8
-        input_8 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
-        x =self.up2(low1,torch.cat((x,input_8),dim=1))#1/4
-        input_4 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
-        x =self.up3(low0,torch.cat((x,input_4),dim=1))#1/2
-        input_2 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
-        seg=self.OutConv(torch.cat((x,input_2),dim=1))#1/2
 
-        seg= F.interpolate(seg,input.size()[2:], mode='bilinear' ,align_corners=True)
+        input_16 = F.interpolate(input, low2.size()[2:4], mode='bilinear', align_corners=True)
+        # x =self.up1(torch.cat((x,input_16),dim=1))#1/8
+        x=self.up1(x,low2,input_16)
+        # print('up1',x.size())
+
+        input_8 = F.interpolate(input, low1.size()[2:4], mode='bilinear', align_corners=True)
+        # x =self.up2(low1,torch.cat((x,input_8),dim=1))#1/4
+        x=self.up2(x,low1,input_8)
+        # print('up2', x.size())
+
+
+        input_4 = F.interpolate(input, low0.size()[2:4], mode='bilinear', align_corners=True)
+        # x =self.up3(low0,torch.cat((x,input_4),dim=1))#1/2
+        x=self.up3(x,low0,input_4)
+        # print('up3', x.size())
+
+        x=self.up4(x,inc1,input)
+        seg=self.OutConv(x)
+        # print('up4', x.size())
+        # print('seg size',seg.size())
+
+
+        # input_2 = F.interpolate(input, x.size()[2:4], mode='bilinear', align_corners=True)
+        # seg=self.up(torch.cat((x,input_2),dim=1))#1/2
+
+        # seg= F.interpolate(seg,input.size()[2:], mode='bilinear' ,align_corners=True)
         return seg
 
     def freeze_bn(self):
