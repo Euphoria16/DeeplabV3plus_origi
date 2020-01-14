@@ -43,16 +43,23 @@ class Decoder(nn.Module):
         low_level_feature = self.conv1(low_level_feature)
         low_level_feature = self.bn1(low_level_feature)
         low_level_feature = self.relu(low_level_feature)
+
         x_4 = F.interpolate(x, size=low_level_feature.size()[2:4], mode='bilinear' ,align_corners=True)
         x_4_cat = torch.cat((x_4, low_level_feature), dim=1)
+
+
         x_4_cat = self.conv2(x_4_cat)
         x_4_cat = self.bn2(x_4_cat)
         x_4_cat = self.relu(x_4_cat)
         x_4_cat = self.dropout2(x_4_cat)
+
+
         x_4_cat = self.conv3(x_4_cat)
         x_4_cat = self.bn3(x_4_cat)
         x_4_cat = self.relu(x_4_cat)
         x_4_cat = self.dropout3(x_4_cat)
+
+
         x_4_cat = self.conv4(x_4_cat)
 
         return x_4_cat
@@ -110,16 +117,16 @@ class DoubleConv(nn.Module):
 class Up(nn.Module):
     """Upscaling then double conv"""
 
-    def __init__(self, in_channels, out_channels, bilinear=True):
+    def __init__(self, in_channels1, in_channels2,out_channels, bilinear=True):
         super().__init__()
 
         # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         else:
-            self.up = nn.ConvTranspose2d(in_channels // 2, in_channels // 2, kernel_size=2, stride=2)
+            self.up = nn.ConvTranspose2d(in_channels2 , in_channels2, kernel_size=2, stride=2)
 
-        self.conv = DoubleConv(in_channels, out_channels)
+        self.conv = DoubleConv(in_channels1+in_channels2, out_channels)
 
     def forward(self, x1, x2):
         # print('before upsample',x1.size())
@@ -144,35 +151,68 @@ class OutConv(nn.Module):
     def forward(self, x):
         return self.conv(x)
 class Unet_decoder(nn.Module):
-    def __init__(self, output_stride, class_num, pretrained, bn_momentum=0.1, freeze_bn=False,
+    def __init__(self, class_num, bn_momentum=0.1,
                  bilinear=True):
         super(Unet_decoder, self).__init__()
-        self.Resnet101 = resnet101(bn_momentum, pretrained, output_stride)
-        self.encoder = Encoder(bn_momentum, output_stride)
-        self.inc= DoubleConv(3,64)
-        # self.cascade_num = cascade_num
-        self.up1= Up(512+256,256,bilinear=bilinear)#to 1/8
-        self.up2 = Up(256 + 256, 128, bilinear=bilinear)# to 1/4
-        self.up3 = Up(128+64,64,bilinear=bilinear)# to 1/2
-        self.up4 = Up(64+64,64,bilinear=bilinear)
-        self.OutConv=OutConv(64,class_num)
-        if freeze_bn:
-            self.freeze_bn()
-            print("freeze bacth normalization successfully!")
 
-    def forward(self, input):
-        x,low0,low1,low2=self.Resnet101(input)#1/2,1/4,1/8
-        inc1=self.inc(input)
-        # print('inc1',inc1.size())
-        x = self.encoder(x)
-        x =self.up1(x,low2)
-        # print('low size',low0.size(),low1.size(),low2.size())
+        # self.cascade_num = cascade_num
+        self.up1= Up(48,256,256,bilinear=bilinear)#to 1/8
+        self.up2 = Up(48 ,256, 128, bilinear=bilinear)# to 1/4
+        self.up3 = Up(32,128,64,bilinear=bilinear)# to 1/2
+        self.up4 = Up(32,64,64,bilinear=bilinear)
+        self.OutConv=OutConv(64,class_num)
+
+        self.conv1 = nn.Conv2d(512, 48, kernel_size=1, bias=False)
+        self.bn1 = SynchronizedBatchNorm2d(48, momentum=bn_momentum)
+        self.relu = nn.ReLU()
+
+        self.conv2 = nn.Conv2d(256, 48, kernel_size=1, bias=False)
+        self.bn2 = SynchronizedBatchNorm2d(48, momentum=bn_momentum)
+
+        self.conv3 = nn.Conv2d(64, 32, kernel_size=1, bias=False)
+        self.bn3 = SynchronizedBatchNorm2d(32, momentum=bn_momentum)
+
+        self.conv4 = nn.Conv2d(64, 32, kernel_size=1, bias=False)
+        self.bn4 = SynchronizedBatchNorm2d(32, momentum=bn_momentum)
+
+        self.inc = DoubleConv(3, 64)
+
+        self._init_weight()
+
+    def forward(self, x,low0,low1,low2,input):
+        # x,low0,low1,low2=self.Resnet101(input)#1/2+64,1/4+256,1/8+512
+        # inc1=self.inc(input)
+        # print('inc1',inc1.size())#64,1/1
+        # x = self.encoder(x)
+
+        inc1 = self.inc(input)
+
+        low2 = self.conv1(low2)
+        low2 = self.bn1(low2)
+        low2 = self.relu(low2)
+        x =self.up1(x,low2)#([8, 256, 65, 65])
+        # print('low2 size',low2.size())
         # print('up1 size', x.size())
-        x =self.up2(x,low1)
+
+        low1 = self.conv2(low1)
+        low1 = self.bn2(low1)
+        low1 = self.relu(low1)
+        x =self.up2(x,low1)#([8, 128, 129, 129])
+        # print('low1 size',low1.size())
         # print('up2 size', x.size())
+
+        low0 = self.conv3(low0)
+        low0 = self.bn3(low0)
+        low0 = self.relu(low0)
         x =self.up3(x,low0)
+        # print('low0 size',low0.size())
         # print('up3 size',x.size())
+
+        inc1 = self.conv4(inc1)
+        inc1 = self.bn4(inc1)
+        inc1 = self.relu(inc1)
         x =self.up4(x,inc1)
+        # print('inc1 size',inc1.size())
         # print('up4 size',x.size())
 
         seg=self.OutConv(x)
@@ -181,10 +221,38 @@ class Unet_decoder(nn.Module):
         # seg= F.interpolate(seg,input.size()[2:], mode='bilinear' ,align_corners=True)
         return seg
 
+    def _init_weight(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, SynchronizedBatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+class DeepLab_Unet(nn.Module):
+    def __init__(self, output_stride, class_num, pretrained, bn_momentum=0.1, freeze_bn=False,bilinear=True):
+        super(DeepLab_Unet, self).__init__()
+        self.Resnet101 = resnet101(bn_momentum, pretrained)
+        self.encoder = Encoder(bn_momentum, output_stride)
+        self.decoder = Unet_decoder(class_num, bn_momentum,
+                 bilinear)
+        if freeze_bn:
+            self.freeze_bn()
+            print("freeze bacth normalization successfully!")
+
+    def forward(self, input):
+        x, low0,low1,low2 = self.Resnet101(input)
+        x = self.encoder(x)
+        predict = self.decoder(x, low0,low1,low2,input)
+        # output= F.interpolate(predict, size=input.size()[2:4], mode='bilinear', align_corners=True)
+        return predict
+
     def freeze_bn(self):
         for m in self.modules():
             if isinstance(m, SynchronizedBatchNorm2d):
                 m.eval()
+
+
 class Up_input(nn.Module):
     """Upscaling then double conv"""
 

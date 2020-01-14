@@ -41,7 +41,7 @@ sys.path.append(os.path.abspath('..'))
 from graphs.models.sync_batchnorm.replicate import patch_replication_callback
 from utils.data_utils import calculate_weigths_labels
 from utils.eval import Eval
-from graphs.models.decoder import Unet_decoder
+from graphs.models.decoder import DeepLab_Unet
 from datasets.Voc_Dataset import VOCDataLoader
 # from datasets.coco import COCODataLoader
 import glob
@@ -90,11 +90,12 @@ class Trainer():
         self.loss.to(self.device)
 
         # model
-        self.model = Unet_decoder(output_stride=self.args.output_stride,
+        self.model = DeepLab_Unet(output_stride=self.args.output_stride,
                              class_num=self.args.num_classes,
                              pretrained=self.args.imagenet_pretrained and self.args.pretrained_ckpt_file==None,
                              bn_momentum=self.args.bn_momentum,
-                             freeze_bn=self.args.freeze_bn)
+                             freeze_bn=self.args.freeze_bn,
+                                  bilinear=self.args.bilinear)
         self.model = nn.DataParallel(self.model, device_ids=range(ceil(len(self.args.gpu)/2)))
         patch_replication_callback(self.model)
         self.model.to(self.device)
@@ -334,10 +335,10 @@ class Trainer():
             logger.info("=> The MIoU of val does't improve.")
 
     def load_checkpoint(self, filename):
-        filename = os.path.join('/home/xh/workspace/Deeplab-v3plus/checkpoints', filename, '*.pth')
+        checkpointname = glob.glob(os.path.join('/home/xh/workspace/Deeplab-v3plus/checkpoints', filename, '*.pth'))[0]
         try:
-            logger.info("Loading checkpoint '{}'".format(filename))
-            checkpoint = torch.load(filename)
+            logger.info("Loading checkpoint '{}'".format(checkpointname))
+            checkpoint = torch.load(checkpointname)
 
             # self.current_epoch = checkpoint['epoch']
             # self.current_iter = checkpoint['iteration']
@@ -349,7 +350,7 @@ class Trainer():
                   .format(self.args.checkpoint_dir, checkpoint['epoch'], checkpoint['iteration'],
                           checkpoint['best_MIou']))
         except OSError as e:
-            logger.info("No checkpoint exists from '{}'. Skipping...".format(self.args.checkpoint_dir))
+            logger.info("No checkpoint exists from '{}'. Skipping...".format(checkpointname))
             logger.info("**First time to train**")
 
     def get_params(self, model, key):
@@ -436,6 +437,8 @@ if __name__ == '__main__':
     # optimization related arguments
 
     arg_parser.add_argument('--freeze_bn', type=str2bool, default=False,
+                            help="whether freeze BatchNormalization")
+    arg_parser.add_argument('--bilinear', type=str2bool, default=True,
                             help="whether freeze BatchNormalization")
 
     arg_parser.add_argument('--momentum', type=float, default=0.9)
