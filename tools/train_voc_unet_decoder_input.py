@@ -41,7 +41,7 @@ sys.path.append(os.path.abspath('..'))
 from graphs.models.sync_batchnorm.replicate import patch_replication_callback
 from utils.data_utils import calculate_weigths_labels
 from utils.eval import Eval
-from graphs.models.decoder import Unet_decoder_input
+from graphs.models.decoder import DeepLab_Unet_input
 from datasets.Voc_Dataset import VOCDataLoader
 # from datasets.coco import COCODataLoader
 import glob
@@ -90,7 +90,7 @@ class Trainer():
         self.loss.to(self.device)
 
         # model
-        self.model = Unet_decoder_input(output_stride=self.args.output_stride,
+        self.model = DeepLab_Unet_input(output_stride=self.args.output_stride,
                              class_num=self.args.num_classes,
                              pretrained=self.args.imagenet_pretrained and self.args.pretrained_ckpt_file==None,
                              bn_momentum=self.args.bn_momentum,

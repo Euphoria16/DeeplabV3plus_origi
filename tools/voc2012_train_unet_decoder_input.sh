@@ -26,7 +26,7 @@ STORE_CHRCKPOINT_NAME_STAGE2="voc2012_aug_no_class_weight_2"
 OUTPUT_STRIDE_STAGE2=8
 PRETRAINED=True
 IMAGENET_TRAINED_STAGE2=False
-RUN_NAME=voc_unet_input_new
+RUN_NAME=voc_Deeplab_unet_input
 
 
 
